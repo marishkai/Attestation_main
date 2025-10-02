@@ -4,6 +4,8 @@ import java.sql.*;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Arrays;
+import java.util.stream.Collectors;
 
 public class App {
     private static int newProductId;
@@ -40,7 +42,7 @@ public class App {
         Connection connection = null;
         try {
             connection = dbManager.getConnection();
-            connection.setAutoCommit(false); // Начинаем транзакцию
+            connection.setAutoCommit(false);
 
             printHeader("🎯 ДЕМОНСТРАЦИЯ CRUD ОПЕРАЦИЙ ЧЕРЕЗ JAVA");
 
@@ -74,29 +76,43 @@ public class App {
 
             printHeader("4. UPDATE - ОБНОВЛЕНИЕ ДАННЫХ");
 
-            // Показываем состояние до обновления
-            printInfo("Состояние ДО обновления:");
-            showProductBeforeUpdate(connection, 1);
+            // Обновление количества товара на складе
+            printInfo("Обновление количества товара на складе...");
+            showProductState(connection, 1, "ДО обновления");
+            updateProductQuantity(connection);
+            showProductState(connection, 1, "ПОСЛЕ обновления");
 
-            updateProductPriceAndQuantity(connection);
+            // Обновление статуса заказа
+            printInfo("Обновление статуса заказа...");
+            showOrderState(connection, 1, "ДО обновления");
+            updateOrderStatus(connection);
+            showOrderState(connection, 1, "ПОСЛЕ обновления");
 
-            // Показываем состояние после обновления
-            printInfo("Состояние ПОСЛЕ обновления:");
-            showProductAfterUpdate(connection, 1);
+            // Обновление цены товара
+            printInfo("Обновление цены товара...");
+            showElectronicsPrices(connection, "ДО обновления");
+            updateProductPrices(connection);
+            showElectronicsPrices(connection, "ПОСЛЕ обновления");
 
             printHeader("5. DELETE - УДАЛЕНИЕ ТЕСТОВЫХ ЗАПИСЕЙ");
 
-            // Показываем состояние до удаления
-            printInfo("Данные ДО удаления:");
-            showDataBeforeDeletion(connection);
+            // Создаем тестовые данные для удаления
+            printInfo("Создание тестовых данных для демонстрации DELETE...");
+            int testCustomerId = createTestCustomerWithoutOrders(connection);
+            int testCancelledOrderId = createTestCancelledOrder(connection);
 
-            deleteTestData(connection, newOrderId, newCustomerId, newProductId);
+            // Показываем состояние до удаления
+            printInfo("Состояние ДО удаления:");
+            showDataBeforeDeletion(connection, testCustomerId, testCancelledOrderId);
+
+            // Удаление тестовых данных
+            deleteTestData(connection, newOrderId, newCustomerId, newProductId, testCustomerId, testCancelledOrderId);
 
             // Показываем состояние после удаления
-            printInfo("Данные ПОСЛЕ удаления:");
-            showDataAfterDeletion(connection);
+            printInfo("Состояние ПОСЛЕ удаления:");
+            showDataAfterDeletion(connection, testCustomerId, testCancelledOrderId);
 
-            connection.commit(); // Подтверждаем транзакцию
+            connection.commit();
             printSuccess("✅ Все CRUD операции выполнены успешно!");
 
         } catch (Exception e) {
@@ -134,18 +150,6 @@ public class App {
                 System.out.println("📋 Заказов: " + rs.getInt("orders_count"));
             }
         }
-
-        // Показываем несколько товаров для наглядности
-        System.out.println("\n📋 Пример товаров:");
-        String productsSql = "SELECT id, description, price, quantity FROM products ORDER BY id LIMIT 3";
-        try (Statement stmt = connection.createStatement();
-             ResultSet rs = stmt.executeQuery(productsSql)) {
-            while (rs.next()) {
-                System.out.println("   ID " + rs.getInt("id") + ": " +
-                        rs.getString("description") + " | Цена: " + rs.getDouble("price") +
-                        " | Кол-во: " + rs.getInt("quantity"));
-            }
-        }
     }
 
     private static void showDataAfterCreation(Connection connection) throws SQLException {
@@ -167,112 +171,63 @@ public class App {
                 }
             }
         }
-
-        // Показываем обновленное количество
-        String countSql = "SELECT " +
-                "(SELECT COUNT(*) FROM products) as products_count, " +
-                "(SELECT COUNT(*) FROM customer) as customers_count, " +
-                "(SELECT COUNT(*) FROM orders) as orders_count";
-
-        try (Statement stmt = connection.createStatement();
-             ResultSet rs = stmt.executeQuery(countSql)) {
-            if (rs.next()) {
-                System.out.println("\n📊 ОБНОВЛЕННОЕ СОСТОЯНИЕ:");
-                System.out.println("📦 Товаров: " + rs.getInt("products_count"));
-                System.out.println("👥 Покупателей: " + rs.getInt("customers_count"));
-                System.out.println("📋 Заказов: " + rs.getInt("orders_count"));
-            }
-        }
     }
 
-    private static void showProductBeforeUpdate(Connection connection, int productId) throws SQLException {
-        String sql = "SELECT description, price, quantity FROM products WHERE id = ?";
-        try (PreparedStatement stmt = connection.prepareStatement(sql)) {
-            stmt.setInt(1, productId);
-            try (ResultSet rs = stmt.executeQuery()) {
-                if (rs.next()) {
-                    System.out.println("📊 Товар ID " + productId + ": " +
-                            rs.getString("description") + " | " +
-                            "Цена: " + rs.getDouble("price") + " | " +
-                            "Количество: " + rs.getInt("quantity"));
-                }
-            }
-        }
-    }
-
-    private static void showProductAfterUpdate(Connection connection, int productId) throws SQLException {
-        String sql = "SELECT description, price, quantity FROM products WHERE id = ?";
-        try (PreparedStatement stmt = connection.prepareStatement(sql)) {
-            stmt.setInt(1, productId);
-            try (ResultSet rs = stmt.executeQuery()) {
-                if (rs.next()) {
-                    System.out.println("📊 Товар ID " + productId + ": " +
-                            rs.getString("description") + " | " +
-                            "Цена: " + rs.getDouble("price") + " | " +
-                            "Количество: " + rs.getInt("quantity"));
-                }
-            }
-        }
-    }
-
-    private static void showDataBeforeDeletion(Connection connection) throws SQLException {
+    private static void showDataBeforeDeletion(Connection connection, int testCustomerId, int testCancelledOrderId) throws SQLException {
         String sql = "SELECT " +
                 "(SELECT COUNT(*) FROM products WHERE id = ?) as product_exists, " +
                 "(SELECT COUNT(*) FROM customer WHERE id = ?) as customer_exists, " +
-                "(SELECT COUNT(*) FROM orders WHERE id = ?) as order_exists";
+                "(SELECT COUNT(*) FROM orders WHERE id = ?) as order_exists, " +
+                "(SELECT COUNT(*) FROM customer WHERE id = ?) as test_customer_exists, " +
+                "(SELECT COUNT(*) FROM orders WHERE id = ?) as test_order_exists";
 
         try (PreparedStatement stmt = connection.prepareStatement(sql)) {
             stmt.setInt(1, newProductId);
             stmt.setInt(2, newCustomerId);
             stmt.setInt(3, newOrderId);
+            stmt.setInt(4, testCustomerId);
+            stmt.setInt(5, testCancelledOrderId);
 
             try (ResultSet rs = stmt.executeQuery()) {
                 if (rs.next()) {
                     System.out.println("🗑️ Товар для удаления существует: " + (rs.getInt("product_exists") > 0 ? "Да" : "Нет"));
                     System.out.println("🗑️ Покупатель для удаления существует: " + (rs.getInt("customer_exists") > 0 ? "Да" : "Нет"));
                     System.out.println("🗑️ Заказ для удаления существует: " + (rs.getInt("order_exists") > 0 ? "Да" : "Нет"));
+                    System.out.println("🗑️ Тестовый покупатель без заказов существует: " + (rs.getInt("test_customer_exists") > 0 ? "Да" : "Нет"));
+                    System.out.println("🗑️ Тестовый отмененный заказ существует: " + (rs.getInt("test_order_exists") > 0 ? "Да" : "Нет"));
                 }
             }
         }
     }
 
-    private static void showDataAfterDeletion(Connection connection) throws SQLException {
+    private static void showDataAfterDeletion(Connection connection, int testCustomerId, int testCancelledOrderId) throws SQLException {
         String sql = "SELECT " +
                 "(SELECT COUNT(*) FROM products WHERE id = ?) as product_exists, " +
                 "(SELECT COUNT(*) FROM customer WHERE id = ?) as customer_exists, " +
-                "(SELECT COUNT(*) FROM orders WHERE id = ?) as order_exists";
+                "(SELECT COUNT(*) FROM orders WHERE id = ?) as order_exists, " +
+                "(SELECT COUNT(*) FROM customer WHERE id = ?) as test_customer_exists, " +
+                "(SELECT COUNT(*) FROM orders WHERE id = ?) as test_order_exists";
 
         try (PreparedStatement stmt = connection.prepareStatement(sql)) {
             stmt.setInt(1, newProductId);
             stmt.setInt(2, newCustomerId);
             stmt.setInt(3, newOrderId);
+            stmt.setInt(4, testCustomerId);
+            stmt.setInt(5, testCancelledOrderId);
 
             try (ResultSet rs = stmt.executeQuery()) {
                 if (rs.next()) {
                     System.out.println("🗑️ Товар после удаления: " + (rs.getInt("product_exists") > 0 ? "Остался" : "Удален"));
                     System.out.println("🗑️ Покупатель после удаления: " + (rs.getInt("customer_exists") > 0 ? "Остался" : "Удален"));
                     System.out.println("🗑️ Заказ после удаления: " + (rs.getInt("order_exists") > 0 ? "Остался" : "Удален"));
+                    System.out.println("🗑️ Тестовый покупатель после удаления: " + (rs.getInt("test_customer_exists") > 0 ? "Остался" : "Удален"));
+                    System.out.println("🗑️ Тестовый заказ после удаления: " + (rs.getInt("test_order_exists") > 0 ? "Остался" : "Удален"));
                 }
-            }
-        }
-
-        // Показываем финальное состояние
-        String countSql = "SELECT " +
-                "(SELECT COUNT(*) FROM products) as products_count, " +
-                "(SELECT COUNT(*) FROM customer) as customers_count, " +
-                "(SELECT COUNT(*) FROM orders) as orders_count";
-
-        try (Statement stmt = connection.createStatement();
-             ResultSet rs = stmt.executeQuery(countSql)) {
-            if (rs.next()) {
-                System.out.println("\n📊 ФИНАЛЬНОЕ СОСТОЯНИЕ:");
-                System.out.println("📦 Товаров: " + rs.getInt("products_count"));
-                System.out.println("👥 Покупателей: " + rs.getInt("customers_count"));
-                System.out.println("📋 Заказов: " + rs.getInt("orders_count"));
             }
         }
     }
 
+    // CRUD операции
     private static int insertNewProduct(Connection connection) throws SQLException {
         String getMaxIdSql = "SELECT COALESCE(MAX(id), 0) + 1 as next_id FROM products";
         int nextId;
@@ -325,6 +280,59 @@ public class App {
         }
     }
 
+    private static int createTestCustomerWithoutOrders(Connection connection) throws SQLException {
+        String getMaxIdSql = "SELECT COALESCE(MAX(id), 0) + 1 as next_id FROM customer";
+        int nextId;
+
+        try (Statement stmt = connection.createStatement();
+             ResultSet rs = stmt.executeQuery(getMaxIdSql)) {
+            if (rs.next()) {
+                nextId = rs.getInt("next_id");
+            } else {
+                throw new SQLException("Не удалось получить следующий ID для покупателя");
+            }
+        }
+
+        String sql = "INSERT INTO customer (id, first_name, last_name, phone, email) VALUES (?, ?, ?, ?, ?)";
+        try (PreparedStatement stmt = connection.prepareStatement(sql)) {
+            stmt.setInt(1, nextId);
+            stmt.setString(2, "Тестовый");
+            stmt.setString(3, "Клиент");
+            stmt.setString(4, "+7-000-000-00-00");
+            stmt.setString(5, "test.client@mail.ru");
+
+            stmt.executeUpdate();
+            return nextId;
+        }
+    }
+
+    private static int createTestCancelledOrder(Connection connection) throws SQLException {
+        String getMaxIdSql = "SELECT COALESCE(MAX(id), 0) + 1 as next_id FROM orders";
+        int nextId;
+
+        try (Statement stmt = connection.createStatement();
+             ResultSet rs = stmt.executeQuery(getMaxIdSql)) {
+            if (rs.next()) {
+                nextId = rs.getInt("next_id");
+            } else {
+                throw new SQLException("Не удалось получить следующий ID для заказа");
+            }
+        }
+
+        String sql = "INSERT INTO orders (id, product_id, customer_id, order_date, quantity, status_id) VALUES (?, ?, ?, ?, ?, ?)";
+        try (PreparedStatement stmt = connection.prepareStatement(sql)) {
+            stmt.setInt(1, nextId);
+            stmt.setInt(2, 1); // Произвольный товар
+            stmt.setInt(3, 1); // Произвольный покупатель
+            stmt.setTimestamp(4, Timestamp.valueOf(LocalDateTime.now().minusMonths(2))); // Старая дата
+            stmt.setInt(5, 1);
+            stmt.setInt(6, 6); // Статус "Отменен"
+
+            stmt.executeUpdate();
+            return nextId;
+        }
+    }
+
     private static int createNewOrder(Connection connection, int customerId, int productId) throws SQLException {
         String getMaxIdSql = "SELECT COALESCE(MAX(id), 0) + 1 as next_id FROM orders";
         int nextId;
@@ -353,15 +361,13 @@ public class App {
     }
 
     private static void readLast5Orders(Connection connection) throws SQLException {
-        String sql = """
-            SELECT o.id, o.order_date, c.first_name, c.last_name, p.description, p.price, o.quantity, os.status_name
-            FROM orders o
-            JOIN customer c ON o.customer_id = c.id
-            JOIN products p ON o.product_id = p.id
-            JOIN order_status os ON o.status_id = os.id
-            ORDER BY o.order_date DESC
-            LIMIT 5
-            """;
+        String sql = "SELECT o.id, o.order_date, c.first_name, c.last_name, p.description, p.price, o.quantity, os.status_name " +
+                "FROM orders o " +
+                "JOIN customer c ON o.customer_id = c.id " +
+                "JOIN products p ON o.product_id = p.id " +
+                "JOIN order_status os ON o.status_id = os.id " +
+                "ORDER BY o.order_date DESC " +
+                "LIMIT 5";
 
         try (PreparedStatement stmt = connection.prepareStatement(sql);
              ResultSet rs = stmt.executeQuery()) {
@@ -387,27 +393,31 @@ public class App {
         }
     }
 
-    private static void updateProductPriceAndQuantity(Connection connection) throws SQLException {
-        // Обновление цены товара
-        String updatePriceSql = "UPDATE products SET price = price * 1.15 WHERE category = 'Электроника' AND id > 10";
-        try (PreparedStatement stmt = connection.prepareStatement(updatePriceSql)) {
+    private static void updateProductQuantity(Connection connection) throws SQLException {
+        String sql = "UPDATE products SET quantity = quantity - 1 WHERE id = 1";
+        try (PreparedStatement stmt = connection.prepareStatement(sql)) {
             int updatedRows = stmt.executeUpdate();
-            printSuccess("Обновлено цен для " + updatedRows + " товаров категории 'Электроника' (+15%)");
-        }
-
-        // Обновление количества на складе
-        String updateQuantitySql = "UPDATE products SET quantity = quantity - 1 WHERE id = 1";
-        try (PreparedStatement stmt = connection.prepareStatement(updateQuantitySql)) {
-            int updatedRows = stmt.executeUpdate();
-            if (updatedRows > 0) {
-                printSuccess("Обновлено количество товара ID=1 (уменьшено на 1)");
-            } else {
-                printInfo("Товар ID=1 не найден, пропускаем обновление количества");
-            }
+            printSuccess("Обновлено количество товара ID=1 (уменьшено на 1)");
         }
     }
 
-    private static void deleteTestData(Connection connection, int orderId, int customerId, int productId) throws SQLException {
+    private static void updateOrderStatus(Connection connection) throws SQLException {
+        String sql = "UPDATE orders SET status_id = (SELECT id FROM order_status WHERE status_name = 'Завершен') WHERE id = 1";
+        try (PreparedStatement stmt = connection.prepareStatement(sql)) {
+            int updatedRows = stmt.executeUpdate();
+            printSuccess("Обновлен статус заказа ID=1 на 'Завершен'");
+        }
+    }
+
+    private static void updateProductPrices(Connection connection) throws SQLException {
+        String sql = "UPDATE products SET price = price * 1.1 WHERE category = 'Электроника'";
+        try (PreparedStatement stmt = connection.prepareStatement(sql)) {
+            int updatedRows = stmt.executeUpdate();
+            printSuccess("Обновлено цен для " + updatedRows + " товаров категории 'Электроника' (+10%)");
+        }
+    }
+
+    private static void deleteTestData(Connection connection, int orderId, int customerId, int productId, int testCustomerId, int testCancelledOrderId) throws SQLException {
         // Удаление тестового заказа
         String deleteOrderSql = "DELETE FROM orders WHERE id = ?";
         try (PreparedStatement stmt = connection.prepareStatement(deleteOrderSql)) {
@@ -437,8 +447,74 @@ public class App {
                 printSuccess("✅ Удален тестовый товар ID: " + productId);
             }
         }
+
+        // Удаление тестового покупателя без заказов
+        try (PreparedStatement stmt = connection.prepareStatement(deleteCustomerSql)) {
+            stmt.setInt(1, testCustomerId);
+            int deletedRows = stmt.executeUpdate();
+            if (deletedRows > 0) {
+                printSuccess("✅ Удален тестовый покупатель без заказов ID: " + testCustomerId);
+            }
+        }
+
+        // Удаление тестового отмененного заказа
+        try (PreparedStatement stmt = connection.prepareStatement(deleteOrderSql)) {
+            stmt.setInt(1, testCancelledOrderId);
+            int deletedRows = stmt.executeUpdate();
+            if (deletedRows > 0) {
+                printSuccess("✅ Удален тестовый отмененный заказ ID: " + testCancelledOrderId);
+            }
+        }
     }
 
+    private static void showProductState(Connection connection, int productId, String state) throws SQLException {
+        String sql = "SELECT description, price, quantity FROM products WHERE id = ?";
+        try (PreparedStatement stmt = connection.prepareStatement(sql)) {
+            stmt.setInt(1, productId);
+            try (ResultSet rs = stmt.executeQuery()) {
+                if (rs.next()) {
+                    System.out.println("📦 Товар ID " + productId + " (" + state + "): " +
+                            rs.getString("description") + " | " +
+                            "Цена: " + rs.getDouble("price") + " | " +
+                            "Количество: " + rs.getInt("quantity"));
+                }
+            }
+        }
+    }
+
+    private static void showOrderState(Connection connection, int orderId, String state) throws SQLException {
+        String sql = "SELECT o.id, os.status_name, o.order_date, c.first_name, c.last_name, p.description " +
+                "FROM orders o " +
+                "JOIN order_status os ON o.status_id = os.id " +
+                "JOIN customer c ON o.customer_id = c.id " +
+                "JOIN products p ON o.product_id = p.id " +
+                "WHERE o.id = ?";
+        try (PreparedStatement stmt = connection.prepareStatement(sql)) {
+            stmt.setInt(1, orderId);
+            try (ResultSet rs = stmt.executeQuery()) {
+                if (rs.next()) {
+                    System.out.println("📋 Заказ ID " + orderId + " (" + state + "): " +
+                            rs.getString("first_name") + " " + rs.getString("last_name") + " | " +
+                            rs.getString("description") + " | " +
+                            "Статус: " + rs.getString("status_name") + " | " +
+                            "Дата: " + rs.getTimestamp("order_date").toString().substring(0, 19));
+                }
+            }
+        }
+    }
+
+    private static void showElectronicsPrices(Connection connection, String state) throws SQLException {
+        String sql = "SELECT description, price FROM products WHERE category = 'Электроника' ORDER BY id";
+        try (Statement stmt = connection.createStatement();
+             ResultSet rs = stmt.executeQuery(sql)) {
+            System.out.println("💰 Цены товаров категории 'Электроника' (" + state + "):");
+            while (rs.next()) {
+                System.out.println("   " + rs.getString("description") + " | Цена: " + rs.getDouble("price"));
+            }
+        }
+    }
+
+    // SQL запросы
     private static void executeTestSQLQueries(DatabaseManager dbManager) {
         printHeader("📊 ВЫПОЛНЕНИЕ ТЕСТОВЫХ SQL-ЗАПРОСОВ");
 
@@ -467,7 +543,6 @@ public class App {
 
                 executedQueries++;
 
-                // Небольшая пауза для читаемости вывода
                 try { Thread.sleep(300); } catch (InterruptedException e) {}
             }
 
@@ -475,147 +550,6 @@ public class App {
 
         } catch (Exception e) {
             printError("Ошибка выполнения тестовых запросов: " + e.getMessage());
-        }
-    }
-
-    private static void showStateBeforeQuery(Connection connection, TestQuery query) throws SQLException {
-        if (query.number == 6) { // Обновление количества товара на складе
-            System.out.println("📊 СОСТОЯНИЕ ДО ОБНОВЛЕНИЯ:");
-            showProductState(connection, 1);
-        }
-        else if (query.number == 7) { // Обновление статуса заказа
-            System.out.println("📊 СОСТОЯНИЕ ДО ОБНОВЛЕНИЯ:");
-            showOrderState(connection, 1);
-        }
-        else if (query.number == 8) { // Обновление цены товара
-            System.out.println("📊 СОСТОЯНИЕ ДО ОБНОВЛЕНИЯ:");
-            showElectronicsPrices(connection);
-        }
-        else if (query.number == 9) { // Удаление тестовых заказов с малым количеством
-            System.out.println("📊 СОСТОЯНИЕ ДО УДАЛЕНИЯ:");
-            showSmallQuantityOrders(connection);
-        }
-        else if (query.number == 10) { // Удаление товаров с нулевым остатком
-            System.out.println("📊 СОСТОЯНИЕ ДО УДАЛЕНИЯ:");
-            showZeroQuantityProducts(connection);
-        }
-    }
-
-    private static void showStateAfterQuery(Connection connection, TestQuery query) throws SQLException {
-        if (query.number == 6) { // Обновление количества товара на складе
-            System.out.println("📊 СОСТОЯНИЕ ПОСЛЕ ОБНОВЛЕНИЯ:");
-            showProductState(connection, 1);
-        }
-        else if (query.number == 7) { // Обновление статуса заказа
-            System.out.println("📊 СОСТОЯНИЕ ПОСЛЕ ОБНОВЛЕНИЯ:");
-            showOrderState(connection, 1);
-        }
-        else if (query.number == 8) { // Обновление цены товара
-            System.out.println("📊 СОСТОЯНИЕ ПОСЛЕ ОБНОВЛЕНИЯ:");
-            showElectronicsPrices(connection);
-        }
-        else if (query.number == 9) { // Удаление тестовых заказов с малым количеством
-            System.out.println("📊 СОСТОЯНИЕ ПОСЛЕ УДАЛЕНИЯ:");
-            showSmallQuantityOrders(connection);
-        }
-        else if (query.number == 10) { // Удаление товаров с нулевым остатком
-            System.out.println("📊 СОСТОЯНИЕ ПОСЛЕ УДАЛЕНИЯ:");
-            showZeroQuantityProducts(connection);
-        }
-    }
-
-    private static void showProductState(Connection connection, int productId) throws SQLException {
-        String sql = "SELECT description, price, quantity FROM products WHERE id = ?";
-        try (PreparedStatement stmt = connection.prepareStatement(sql)) {
-            stmt.setInt(1, productId);
-            try (ResultSet rs = stmt.executeQuery()) {
-                if (rs.next()) {
-                    System.out.println("📦 Товар ID " + productId + ": " +
-                            rs.getString("description") + " | " +
-                            "Цена: " + rs.getDouble("price") + " | " +
-                            "Количество: " + rs.getInt("quantity"));
-                }
-            }
-        }
-    }
-
-    private static void showOrderState(Connection connection, int orderId) throws SQLException {
-        String sql = """
-            SELECT o.id, os.status_name, o.order_date, c.first_name, c.last_name, p.description 
-            FROM orders o 
-            JOIN order_status os ON o.status_id = os.id 
-            JOIN customer c ON o.customer_id = c.id 
-            JOIN products p ON o.product_id = p.id 
-            WHERE o.id = ?
-            """;
-        try (PreparedStatement stmt = connection.prepareStatement(sql)) {
-            stmt.setInt(1, orderId);
-            try (ResultSet rs = stmt.executeQuery()) {
-                if (rs.next()) {
-                    System.out.println("📋 Заказ ID " + orderId + ": " +
-                            rs.getString("first_name") + " " + rs.getString("last_name") + " | " +
-                            rs.getString("description") + " | " +
-                            "Статус: " + rs.getString("status_name") + " | " +
-                            "Дата: " + rs.getTimestamp("order_date").toString().substring(0, 19));
-                }
-            }
-        }
-    }
-
-    private static void showElectronicsPrices(Connection connection) throws SQLException {
-        String sql = "SELECT description, price FROM products WHERE category = 'Электроника' ORDER BY id";
-        try (Statement stmt = connection.createStatement();
-             ResultSet rs = stmt.executeQuery(sql)) {
-            System.out.println("💰 Цены товаров категории 'Электроника':");
-            while (rs.next()) {
-                System.out.println("   " + rs.getString("description") + " | Цена: " + rs.getDouble("price"));
-            }
-        }
-    }
-
-    private static void showSmallQuantityOrders(Connection connection) throws SQLException {
-        String sql = "SELECT COUNT(*) as count FROM orders WHERE quantity = 1 AND id > 15";
-        try (Statement stmt = connection.createStatement();
-             ResultSet rs = stmt.executeQuery(sql)) {
-            if (rs.next()) {
-                System.out.println("📋 Заказов с количеством 1 и ID > 15: " + rs.getInt("count"));
-            }
-        }
-
-        // Показываем детали
-        String detailsSql = "SELECT o.id, o.quantity, c.first_name, c.last_name, p.description " +
-                "FROM orders o " +
-                "JOIN customer c ON o.customer_id = c.id " +
-                "JOIN products p ON o.product_id = p.id " +
-                "WHERE o.quantity = 1 AND o.id > 15 " +
-                "ORDER BY o.id";
-        try (Statement stmt = connection.createStatement();
-             ResultSet rs = stmt.executeQuery(detailsSql)) {
-            while (rs.next()) {
-                System.out.println("   Заказ ID " + rs.getInt("id") + ": " +
-                        rs.getString("first_name") + " " + rs.getString("last_name") + " | " +
-                        rs.getString("description") + " | Кол-во: " + rs.getInt("quantity"));
-            }
-        }
-    }
-
-    private static void showZeroQuantityProducts(Connection connection) throws SQLException {
-        String sql = "SELECT COUNT(*) as count FROM products WHERE quantity = 0";
-        try (Statement stmt = connection.createStatement();
-             ResultSet rs = stmt.executeQuery(sql)) {
-            if (rs.next()) {
-                System.out.println("📦 Товаров с нулевым остатком: " + rs.getInt("count"));
-            }
-        }
-
-        // Показываем детали
-        String detailsSql = "SELECT id, description, quantity FROM products WHERE quantity = 0 ORDER BY id";
-        try (Statement stmt = connection.createStatement();
-             ResultSet rs = stmt.executeQuery(detailsSql)) {
-            while (rs.next()) {
-                System.out.println("   Товар ID " + rs.getInt("id") + ": " +
-                        rs.getString("description") + " | Кол-во: " + rs.getInt("quantity"));
-            }
         }
     }
 
@@ -672,14 +606,121 @@ public class App {
         queries.add(new TestQuery(8, "Обновление цены товара",
                 "UPDATE products SET price = price * 1.1 WHERE category = 'Электроника'"));
 
-        // 2 ЗАПРОСА НА УДАЛЕНИЕ (обновленные)
-        queries.add(new TestQuery(9, "Удаление тестовых заказов с малым количеством",
-                "DELETE FROM orders WHERE quantity = 1 AND id > 15"));
+        // 2 ЗАПРОСА НА УДАЛЕНИЕ
+        queries.add(new TestQuery(9, "Удаление конкретных заказов с ID 16 и 17",
+                "DELETE FROM orders WHERE id IN (16, 17)"));
 
-        queries.add(new TestQuery(10, "Удаление товаров с нулевым остатком",
-                "DELETE FROM products WHERE quantity = 0"));
+        queries.add(new TestQuery(10, "Удаление старых отмененных заказов",
+                "DELETE FROM orders WHERE status_id = (SELECT id FROM order_status WHERE status_name = 'Отменен') " +
+                        "AND order_date < '2025-09-20'"));
 
         return queries;
+    }
+
+    private static void showStateBeforeQuery(Connection connection, TestQuery query) throws SQLException {
+        if (query.number == 6) {
+            System.out.println("📊 СОСТОЯНИЕ ДО ОБНОВЛЕНИЯ:");
+            showProductState(connection, 1, "ДО обновления");
+        }
+        else if (query.number == 7) {
+            System.out.println("📊 СОСТОЯНИЕ ДО ОБНОВЛЕНИЯ:");
+            showOrderState(connection, 1, "ДО обновления");
+        }
+        else if (query.number == 8) {
+            System.out.println("📊 СОСТОЯНИЕ ДО ОБНОВЛЕНИЯ:");
+            showElectronicsPrices(connection, "ДО обновления");
+        }
+        else if (query.number == 9) {
+            System.out.println("📊 СОСТОЯНИЕ ДО УДАЛЕНИЯ:");
+            showSpecificOrders(connection, "ДО удаления", Arrays.asList(16, 17));
+        }
+        else if (query.number == 10) {
+            System.out.println("📊 СОСТОЯНИЕ ДО УДАЛЕНИЯ:");
+            showOldCancelledOrders(connection, "ДО удаления");
+        }
+    }
+
+    private static void showStateAfterQuery(Connection connection, TestQuery query) throws SQLException {
+        if (query.number == 6) {
+            System.out.println("📊 СОСТОЯНИЕ ПОСЛЕ ОБНОВЛЕНИЯ:");
+            showProductState(connection, 1, "ПОСЛЕ обновления");
+        }
+        else if (query.number == 7) {
+            System.out.println("📊 СОСТОЯНИЕ ПОСЛЕ ОБНОВЛЕНИЯ:");
+            showOrderState(connection, 1, "ПОСЛЕ обновления");
+        }
+        else if (query.number == 8) {
+            System.out.println("📊 СОСТОЯНИЕ ПОСЛЕ ОБНОВЛЕНИЯ:");
+            showElectronicsPrices(connection, "ПОСЛЕ обновления");
+        }
+        else if (query.number == 9) {
+            System.out.println("📊 СОСТОЯНИЕ ПОСЛЕ УДАЛЕНИЯ:");
+            showSpecificOrders(connection, "ПОСЛЕ удаления", Arrays.asList(16, 17));
+        }
+        else if (query.number == 10) {
+            System.out.println("📊 СОСТОЯНИЕ ПОСЛЕ УДАЛЕНИЯ:");
+            showOldCancelledOrders(connection, "ПОСЛЕ удаления");
+        }
+    }
+
+    private static void showSpecificOrders(Connection connection, String state, List<Integer> orderIds) throws SQLException {
+        String ids = orderIds.stream().map(String::valueOf).collect(Collectors.joining(","));
+
+        String sql = "SELECT COUNT(*) as count FROM orders WHERE id IN (" + ids + ")";
+        try (Statement stmt = connection.createStatement();
+             ResultSet rs = stmt.executeQuery(sql)) {
+            if (rs.next()) {
+                System.out.println("📋 Заказов с ID в (" + ids + ") (" + state + "): " + rs.getInt("count"));
+            }
+        }
+
+        String detailsSql = "SELECT o.id, o.quantity, c.first_name, c.last_name, p.description, os.status_name " +
+                "FROM orders o " +
+                "JOIN customer c ON o.customer_id = c.id " +
+                "JOIN products p ON o.product_id = p.id " +
+                "JOIN order_status os ON o.status_id = os.id " +
+                "WHERE o.id IN (" + ids + ") " +
+                "ORDER BY o.id";
+        try (Statement stmt = connection.createStatement();
+             ResultSet rs = stmt.executeQuery(detailsSql)) {
+            while (rs.next()) {
+                System.out.println("   Заказ ID " + rs.getInt("id") + ": " +
+                        rs.getString("first_name") + " " + rs.getString("last_name") + " | " +
+                        rs.getString("description") + " | Кол-во: " + rs.getInt("quantity") +
+                        " | Статус: " + rs.getString("status_name"));
+            }
+        }
+    }
+
+    private static void showOldCancelledOrders(Connection connection, String state) throws SQLException {
+        String sql = "SELECT COUNT(*) as count " +
+                "FROM orders " +
+                "WHERE status_id = (SELECT id FROM order_status WHERE status_name = 'Отменен') " +
+                "AND order_date < '2025-09-20'";
+        try (Statement stmt = connection.createStatement();
+             ResultSet rs = stmt.executeQuery(sql)) {
+            if (rs.next()) {
+                System.out.println("🗑️ Старых ОТМЕНЕННЫХ заказов (до 20 сентября 2025) (" + state + "): " + rs.getInt("count"));
+            }
+        }
+
+        String detailsSql = "SELECT o.id, o.order_date, c.first_name, c.last_name, p.description, os.status_name " +
+                "FROM orders o " +
+                "JOIN customer c ON o.customer_id = c.id " +
+                "JOIN products p ON o.product_id = p.id " +
+                "JOIN order_status os ON o.status_id = os.id " +
+                "WHERE os.status_name = 'Отменен' " +
+                "AND o.order_date < '2025-09-20'" +
+                "ORDER BY o.order_date";
+        try (Statement stmt = connection.createStatement();
+             ResultSet rs = stmt.executeQuery(detailsSql)) {
+            while (rs.next()) {
+                System.out.println("   Заказ ID " + rs.getInt("id") + ": " +
+                        rs.getString("first_name") + " " + rs.getString("last_name") + " | " +
+                        rs.getString("description") + " | Дата: " + rs.getTimestamp("order_date").toString().substring(0, 10) +
+                        " | Статус: " + rs.getString("status_name"));
+            }
+        }
     }
 
     private static void executeSingleQuery(Connection connection, TestQuery query) {
@@ -713,7 +754,6 @@ public class App {
                     String stringValue;
 
                     if (value instanceof java.sql.Timestamp) {
-                        // Обрезаем миллисекунды
                         String dateString = value.toString();
                         if (dateString.length() > 19) {
                             dateString = dateString.substring(0, 19);
@@ -755,6 +795,7 @@ public class App {
         }
     }
 
+    // Вспомогательные методы для вывода
     private static void printTable(List<String> headers, List<List<String>> rows, List<Integer> widths) {
         printTableBorder("┌", "┬", "┐", widths);
 

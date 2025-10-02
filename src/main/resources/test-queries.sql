@@ -1,6 +1,5 @@
 -- 1. Список всех заказов за последние 7 дней с именем покупателя и описанием товара
-SELECT o.id
-AS "Номер заказа", o.order_date AS "Дата заказа",
+SELECT o.id AS "Номер заказа", o.order_date AS "Дата заказа",
 c.first_name AS "Имя", c.last_name AS "Фамилия",
 p.description AS "Товар", o.quantity AS "Количество", os.status_name AS "Статус"
 FROM orders o
@@ -58,10 +57,10 @@ UPDATE products
 SET price = price * 1.1
 WHERE category = 'Электроника';
 
--- 9. Удаление тестовых заказов с малым количеством
-DELETE FROM orders
-WHERE quantity = 1 AND id > 15;
+-- 9. Удаление конкретных заказов с ID 16 и 17
+DELETE FROM orders WHERE id IN (16, 17);
 
--- 10. Удаление товаров с нулевым остатком
-DELETE FROM products
-WHERE quantity = 0;
+-- 10. Удаление старых завершенных заказов (до 20 сентября 2025)
+DELETE FROM orders
+WHERE status_id = (SELECT id FROM order_status WHERE status_name = 'Отменен')
+AND order_date < '2025-09-20';
