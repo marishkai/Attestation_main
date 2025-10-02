@@ -58,11 +58,10 @@ UPDATE products
 SET price = price * 1.1
 WHERE category = 'Электроника';
 
--- 9. Удаление клиентов без заказов
-DELETE FROM customer
-WHERE id NOT IN (SELECT DISTINCT customer_id FROM orders);
-
--- 10. Удаление старых отмененных заказов
+-- 9. Удаление тестовых заказов с малым количеством
 DELETE FROM orders
-WHERE status_id = (SELECT id FROM order_status WHERE status_name = 'Отменен')
-AND order_date < CURRENT_DATE - INTERVAL '1 year';
+WHERE quantity = 1 AND id > 15;
+
+-- 10. Удаление товаров с нулевым остатком
+DELETE FROM products
+WHERE quantity = 0;
